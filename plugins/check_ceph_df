@@ -1,0 +1,79 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+CEPH_COMMAND="/usr/bin/ceph"
+
+warning_level=15
+critical_level=5
+
+usage() {
+    echo "Usage: check_ceph_df [-h] [-d] [-w warning] [-c critical]"
+    echo "options:"
+    echo " -w PERCENT : Percent(1-100) use when to warning"
+    echo " -c PERCENT : Percent(1-100) use when to critical"
+    echo " -h : Show help"
+    echo " -d : Debug Mode"
+
+    echo "Examples:"
+    echo "  check_ceph_df -w 90 -c 95"
+}
+
+debug() {
+    set -x
+}
+
+ceph_df(){
+    CEPH_OUTPUT=`ceph df |head -3`
+
+    CEPH_TOTAL=`echo $CEPH_OUTPUT |cut -d " " -f 8 |cut -d "G" -f1`
+    CEPH_FREE=`echo $CEPH_OUTPUT |cut -d " " -f 9 |cut -d "G" -f1`
+    CEPH_USE_PERCENT=`echo $CEPH_OUTPUT |cut -d " " -f 11`
+    CEPH_FREE_PERCENT=$(echo "scale=2; (100 - $CEPH_USE_PERCENT)" | bc)
+
+    CEPH_WARNING_SIZE=$(echo "scale=2; (($CEPH_TOTAL * $warning_level) / 100) " | bc | awk '{printf "%.2f", $0}')
+    CEPH_CRITICAL_SIZE=$(echo "scale=2; (($CEPH_TOTAL * $critical_level) / 100) " | bc | awk '{printf "%.2f", $0}')
+
+    if [ $(echo " $CEPH_FREE_PERCENT < $critical_level" | bc) -eq 1 ]; then
+        echo "CRITICAL - $CEPH_FREE_PERCENT% ($CEPH_FREE GB) free. $CEPH_TOTAL GB total. | Free=$CEPH_FREE"GB";$CEPH_WARNING_SIZE;$CEPH_CRITICAL_SIZE;;$CEPH_TOTAL"
+        exit $STATE_CRITICAL
+    elif [ $(echo " $CEPH_FREE_PERCENT < $warning_level" | bc) -eq 1 ]; then
+        echo "WARNING - $CEPH_FREE_PERCENT% ($CEPH_FREE GB) free. $CEPH_TOTAL GB total. | Free=$CEPH_FREE"GB";$CEPH_WARNING_SIZE;$CEPH_CRITICAL_SIZE;;$CEPH_TOTAL"
+        exit $STATE_WARNING
+    else
+        echo "OK - $CEPH_FREE_PERCENT% ($CEPH_FREE GB) free. $CEPH_TOTAL GB total. | Free=$CEPH_FREE"GB";$CEPH_WARNING_SIZE;$CEPH_CRITICAL_SIZE;;$CEPH_TOTAL"
+        exit $STATE_OK
+    fi
+
+}
+
+# Parse parameters
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h | --help)
+            usage
+            exit $STATE_OK
+            ;;
+        -d | --debug)
+            debug
+            ;;
+        --warning|-w)
+            shift
+            warning_level=$1
+            ;;
+        --critical|-c)
+            shift
+            critical_level=$1
+            ;;
+        *)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+        esac
+shift
+done
+
+ceph_df

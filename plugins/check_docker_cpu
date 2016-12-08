@@ -1,0 +1,159 @@
+#!/usr/bin/env python
+""" a simple pluings for Docker container status check """
+
+import argparse
+import json
+import sys
+import time
+
+from docker import Client
+
+
+def get_options():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--host', '-H',
+                        help='Docker host ip address',
+                        dest="DOCKERIP", default="127.0.0.1")
+    parser.add_argument('--port', '-p',
+                        help='Docker host listen port',
+                        dest="DOCKERPORT", type=int, default="2375")
+    parser.add_argument('--name', '-n',
+                        help='Docker container name',
+                        dest="CONTAINERNAME")
+    parser.add_argument('--warning', '-w',
+                        help='Percent(1-100) use when to warning',
+                        dest="WARNING", type=int, default=90)
+    parser.add_argument('--critical', '-c',
+                        help='Percent(1-100) use when to critical',
+                        dest="CRITICAL", type=int, default=95)
+    options = parser.parse_args()
+    return options
+
+
+def validate_input(critical, warning):
+    if (critical <= 0) or (critical >= 100) or \
+       (warning <= 0) or (warning >= 100):
+        print "UNKNOWN - invalid input, check nrpe settings"
+        sys.exit(3)
+
+    if critical < warning:
+        print "UNKNOWN - CRITICAL should not smaller than WARNING"
+        sys.exit(3)
+
+
+def get_usage_value(client, target):
+    stats_obj = client.stats(target)
+    for obj in stats_obj:
+        jobj = json.loads(obj)
+        break
+    return jobj
+
+
+def get_stats(client, target):
+    stats = {
+        'total_usage_delta': '',
+        'system_cpu_usage_delta': '',
+        'core_number': '',
+    }
+
+    json_data = get_usage_value(client, target)
+    total_usage = int(json_data['cpu_stats']['cpu_usage']['total_usage'])
+    system_cpu_usage = int(json_data['cpu_stats']['system_cpu_usage'])
+
+    time.sleep(1)
+
+    json_data2 = get_usage_value(client, target)
+    total_usage2 = int(json_data2['cpu_stats']['cpu_usage']['total_usage'])
+    system_cpu_usage2 = int(json_data2['cpu_stats']['system_cpu_usage'])
+
+    core_number = len(json_data['cpu_stats']['cpu_usage']['percpu_usage'])
+
+    stats['core_number'] = core_number
+    stats['total_usage_delta'] = total_usage2 - total_usage
+    stats['system_cpu_usage_delta'] = system_cpu_usage2 - system_cpu_usage
+
+    return stats
+
+
+def get_status(percentage, critical, warning):
+    """
+    get the status code of the plugin that defined by nagios-plugins
+    status code definition could be found at the following url:
+    https://nagios-plugins.org/doc/guidelines.html#AEN78
+    """
+
+    if percentage > 100:
+        return 3
+    elif percentage > critical:
+        return 2
+    elif percentage > warning:
+        return 1
+    else:
+        return 0
+
+
+def container_exist(client, target):
+    exist = 0
+    containers = client.containers()
+    for container in containers:
+        for name in container['Names']:
+            if target == name.split('/')[1]:
+                exist = 1
+                break
+    return exist
+
+
+def get_output(critical, warning, dockerip, dockerport, target):
+    status = ['OK', 'WARNING', 'CRITICAL', 'UNKNOWN']
+
+    if dockerip == '127.0.0.1' or dockerip == 'localhost':
+        base_url = "unix://var/run/docker.sock"
+        client = Client()
+    else:
+        base_url = "tcp://%s:%s" % (dockerip, dockerport)
+        client = Client(base_url=base_url)
+
+    if container_exist(client, target) != 1:
+        print("CRITICAL - target not found")
+        sys.exit(3)
+
+    input_data = get_stats(client, target)
+
+    usage = float(input_data['total_usage_delta'])
+    system = float(input_data['system_cpu_usage_delta'])
+    core = int(input_data['core_number'])
+
+    percentage = 0.0
+
+    # prevent devide by zero
+    if usage > 0.0 and system > 0.0:
+        percentage = round((usage / system) * core * 100, 2)
+
+    result = get_status(percentage, critical, warning)
+
+    if result == 3:
+        print("%s - CPU value error." %
+              status[result]),
+    else:
+        print("%s - Use:%s%%" %
+              (status[result], percentage)),
+
+        print(" | Use=%s%%;%s;%s;;" %
+              (percentage, warning, critical))
+
+    return result
+
+
+def main():
+    option = get_options()
+    validate_input(option.CRITICAL, option.WARNING)
+    exit_code = get_output(option.CRITICAL,
+                           option.WARNING,
+                           option.DOCKERIP,
+                           option.DOCKERPORT,
+                           option.CONTAINERNAME)
+    sys.exit(exit_code)
+
+
+if __name__ == '__main__':
+    main()

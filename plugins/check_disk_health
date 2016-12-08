@@ -1,0 +1,76 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+DEV_ID="/dev/disk/by-id/"
+
+usage() {
+    echo "Usage: check_disk_health [-h] [-d] "
+    echo "options:"
+    echo " -h : Show help"
+    echo " -d : Debug Mode"
+
+    echo "Examples:"
+    echo "  check_disk_health"
+}
+
+debug() {
+    set -x
+}
+
+# Parse parameters
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h | --help)
+            usage
+            exit $STATE_OK
+            ;;
+        -d | --debug)
+            debug
+            ;;
+        --)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+        esac
+shift
+done
+
+ISCSIADM=`which iscsiadm`
+COMPARE_FLAG=0
+
+ERROR_COUNT=0
+ERROR_DEV=""
+if [ -e ${DEV_ID} ]; then
+    for d in $(ls ${DEV_ID} | grep -E 'ata|scsi-3' | grep -v part | grep -v DVD |grep -E -v 'scsi-SATA|_HN-|scsi') ; do
+        DEV_NAME=`echo /dev/$(basename $(readlink /dev/disk/by-id/$d))`
+        if [ `which iscsiadm` ]; then
+            for iscsi_dev in $(iscsiadm -m session -P 3 |grep sd |awk '{print $4}' ) ; do
+                if [ $(basename $(readlink /dev/disk/by-id/$d)) = $iscsi_dev ]; then
+                    COMPARE_FLAG=1
+                fi
+            done
+        fi
+        if [ ${COMPARE_FLAG} = 0 ]; then
+            PASS=`smartctl -H ${DEV_NAME} `;
+            SHOW_PASS=`$PASS |grep -E "PASSED|OK"`
+        fi
+        if [ -z ${SHOW_PASS} ]; then
+            ERROR_COUNT=$((ERROR_COUNT+1))
+            ERROR_DEV="$ERROR_DEV $DEV_NAME"
+        fi
+    done
+    if [ $ERROR_COUNT -eq 0 ]; then
+        echo "OK - All DISK PASSED."
+        exit $STATE_OK
+    else
+        echo "WARNING - Failure:$ERROR_DEV."
+        exit $STATE_WARNING
+    fi
+else
+    echo "UNKNOWN - Can't find device ID. "
+    exit $STATE_UNKNOWN
+fi

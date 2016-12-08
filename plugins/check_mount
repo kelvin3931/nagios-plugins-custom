@@ -1,0 +1,45 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+usage() {
+    echo "Usage: check_mount [-h] [-t mount point]"
+    echo "options:"
+    echo " -t : Mount point"
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --help|-h)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+        --mount-point|-t)
+            shift
+            MOUNT=$1
+            ;;
+        *)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+    esac
+shift
+done
+
+if [ -z "${MOUNT}" ]; then
+    echo "UNKNOWN - parameter missing"
+    exit $STATE_UNKNOWN
+fi
+
+# do not remove space before/after grep
+grep -q "[[:space:]]${MOUNT}[[:space:]]" /proc/mounts
+if [ $? -eq 0 ]; then
+    echo "OK - mount point check passed"
+    exit $STATE_OK
+else
+    echo "CRITICAL - mount point not found"
+    exit $STATE_CRITICAL
+fi

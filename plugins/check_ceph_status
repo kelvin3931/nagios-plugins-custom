@@ -1,0 +1,65 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+CEPH_COMMAND="/usr/bin/ceph"
+
+usage() {
+    echo "Usage: check_ceph_status [-h] [-d]"
+    echo "options:"
+    echo " -h : Show help"
+    echo " -d : Debug Mode"
+
+    echo "Examples:"
+    echo "  check_ceph_status"
+}
+
+debug() {
+    set -x
+}
+
+ceph_status(){
+    CEPH_HEALTH_INFO=`ceph health`
+    CEPH_HEALTH_STATUS=`echo $CEPH_HEALTH_INFO | cut -d " " -f1`
+    CEPH_OSD_STATUS=`ceph status |grep 'osd'`
+    CEPH_OSD_TOTAL=`echo $CEPH_OSD_STATUS |cut -d " " -f3`
+    CEPH_OSD_UP=`echo $CEPH_OSD_STATUS |cut -d " " -f5`
+    CEPH_OSD_IN=`echo $CEPH_OSD_STATUS |cut -d " " -f7`
+
+    if [ "${CEPH_HEALTH_STATUS}" = "HEALTH_OK" ]; then
+        echo "OK - ${CEPH_HEALTH_INFO} osd:$CEPH_OSD_TOTAL up:$CEPH_OSD_UP in:$CEPH_OSD_IN"
+        exit $STATE_OK
+    elif [ "${CEPH_HEALTH_STATUS}" = "HEALTH_WARN" ]; then
+        echo "WARNING - ${CEPH_HEALTH_INFO} osd:$CEPH_OSD_TOTAL up:$CEPH_OSD_UP in:$CEPH_OSD_IN"
+        exit $STATE_WARNING
+    elif [ "${CEPH_HEALTH_STATUS}" = "HEALTH_ERR" ]; then
+        echo "ERROR - ${CEPH_HEALTH_INFO} osd:$CEPH_OSD_TOTAL up:$CEPH_OSD_UP in:$CEPH_OSD_IN"
+        exit $STATE_CRITICAL
+    else
+        echo "UNKNOWN - unknown ceph status"
+        exit $STATE_UNKNOWN
+    fi
+}
+
+# Parse parameters
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h | --help)
+            usage
+            exit $STATE_OK
+            ;;
+        -d | --debug)
+            debug
+            ;;
+        *)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+        esac
+shift
+done
+
+ceph_status

@@ -1,0 +1,135 @@
+#!/usr/bin/env python
+""" a simple pluings for Docker container status check """
+
+import argparse
+import json
+import sys
+import time
+
+from docker import Client
+
+
+def get_options():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--host', '-H',
+                        help='Docker host ip address',
+                        dest="DOCKERIP", default="127.0.0.1")
+    parser.add_argument('--port', '-p',
+                        help='Docker host listen port',
+                        dest="DOCKERPORT", type=int, default="2375")
+    parser.add_argument('--name', '-n',
+                        help='Docker container name',
+                        dest="CONTAINERNAME")
+    parser.add_argument('--warning', '-w',
+                        help='Traffic use when to warning',
+                        dest="WARNING", type=int, default=900000000)
+    parser.add_argument('--critical', '-c',
+                        help='Traffic use when to critical',
+                        dest="CRITICAL", type=int, default=950000000)
+    options = parser.parse_args()
+    return options
+
+
+def validate_input(critical, warning):
+    if critical < warning:
+        print "UNKNOWN - CRITICAL should not smaller than WARNING"
+        sys.exit(3)
+
+
+def get_usage_value(client, target):
+    stats_obj = client.stats(target)
+    for obj in stats_obj:
+        jobj = json.loads(obj)
+        break
+    return jobj
+
+
+def get_stats(client, target):
+    stats_obj = client.stats(target)
+    stats = {
+        'rx_bytes': '',
+        'tx_bytes': '',
+    }
+
+    json_data = get_usage_value(client, target)
+    rx = int(json_data['networks']['eth0']['rx_bytes'])
+    tx = int(json_data['networks']['eth0']['tx_bytes'])
+
+    time.sleep(1)
+    json_data2 = get_usage_value(client, target)
+    rx2 = int(json_data2['networks']['eth0']['rx_bytes'])
+    tx2 = int(json_data2['networks']['eth0']['tx_bytes'])
+
+    stats['rx_bytes'] = rx2 - rx
+    stats['tx_bytes'] = tx2 - tx
+
+    return stats
+
+
+def get_status(rx, tx, critical, warning):
+    """
+    get the status code of the plugin that defined by nagios-plugins
+    status code definition could be found at the following url:
+    https://nagios-plugins.org/doc/guidelines.html#AEN78
+    """
+
+    if int(rx) > critical or int(tx) > critical:
+        return 2
+    elif int(rx) > warning or int(tx) > warning:
+        return 1
+    else:
+        return 0
+
+
+def container_exist(client, target):
+    exist = 0
+    containers = client.containers()
+    for container in containers:
+        for name in container['Names']:
+            if target == name.split('/')[1]:
+                exist = 1
+                break
+    return exist
+
+
+def get_output(critical, warning, dockerip, dockerport, target):
+    status = ['OK', 'WARNING', 'CRITICAL', 'UNKNOWN']
+
+    if dockerip == '127.0.0.1' or dockerip == 'localhost':
+        base_url = "unix://var/run/docker.sock"
+        client = Client()
+    else:
+        base_url = "tcp://%s:%s" % (dockerip, dockerport)
+        client = Client(base_url=base_url)
+
+    if container_exist(client, target) != 1:
+        print("CRITICAL - target not found")
+        sys.exit(3)
+
+    input_data = get_stats(client, target)
+
+    rx = input_data['rx_bytes']
+    tx = input_data['tx_bytes']
+
+    result = get_status(rx, tx, critical, warning)
+
+    print("%s - In=%sbytes/s,Out=%sbytes/s" %
+          (status[result], rx, tx)),
+
+    print(" | In=%s;%s;%s;0;0; Out=%s;%s;%s;0;0" %
+          (rx, warning, critical, tx, warning, critical))
+    return result
+
+def main():
+    option = get_options()
+    validate_input(option.CRITICAL, option.WARNING)
+    exit_code = get_output(option.CRITICAL,
+                           option.WARNING,
+                           option.DOCKERIP,
+                           option.DOCKERPORT,
+                           option.CONTAINERNAME)
+    sys.exit(exit_code)
+
+
+if __name__ == '__main__':
+    main()

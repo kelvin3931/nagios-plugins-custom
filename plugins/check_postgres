@@ -1,0 +1,46 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+usage() {
+    echo "Usage: check_cpu [-h] [-H]"
+    echo "options:"
+    echo " -H HOSTNAME : postgres server host"
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in 
+        --help|-h)
+            usage
+            exit ${STATUS_UNKNOWN}
+            ;;
+        --host|-H)
+            shift
+            HOST_IP=$1
+            ;;
+        *)
+            usage
+            exit ${STATUS_UNKNOWN}
+            ;;
+    esac
+shift
+done
+
+#Postgres package "postgresql-client-common" is necessary
+if ! which pg_isready >/dev/null 2>&1
+    then
+    echo "UNKNOWN: command not found."
+    exit ${STATE_UNKNOWN}
+fi
+
+pg_isready -h $HOST_IP > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+    echo "OK - service is running"
+    exit ${STATE_OK}
+else 
+    echo "CRITICAL - service is not running"
+    exit ${STATE_CRITICAL}
+fi 

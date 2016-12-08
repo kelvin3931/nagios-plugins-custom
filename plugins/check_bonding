@@ -1,0 +1,58 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+usage() {
+    echo "Usage: check_bonding [-h] [-d]"
+    echo "options:"
+    echo " -h : Show help"
+    echo " -d : Debug Mode"
+}
+
+debug() {
+    set -x
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            usage
+            exit $STATE_OK
+            ;;
+        -d | --debug)
+            debug
+            ;;
+        --)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+    esac
+shift
+done
+
+MASTERS="/sys/class/net/bonding_masters"
+if [ ! -e "${MASTERS}" ]; then
+    echo "UNKNOWN - bonding interface not found"
+    exit $STATE_UNKNOWN
+fi
+
+MEMBERS="$(cut -d' ' -f1 ${MASTERS})"
+BASEDIRSYS="/sys/class/net/${MEMBERS}/bonding"
+
+MODE="$(cut -d' ' -f1 ${BASEDIRSYS}/mode)"
+ACTIVE="$(cat ${BASEDIRSYS}/active_slave)"
+SLAVES="$(cat ${BASEDIRSYS}/slaves)"
+
+grep -q "down" "/proc/net/bonding/${MEMBERS}"
+STATUS=$?
+
+if [ $STATUS -ne 0 ]; then
+    echo "OK - mode: ${MODE}, active: ${ACTIVE}, slaves: ${SLAVES}"
+    exit $STATE_OK
+else
+    echo "WARNING - bonding status abnormal, mode: ${MODE}, active: ${ACTIVE}, slaves: ${SLAVES}"
+    exit $STATE_WARNING
+fi

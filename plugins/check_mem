@@ -1,0 +1,69 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+usage() {
+    echo "Usage: check_mem [-h] [-w warnlevel] [-c critlevel]"
+    echo "options:"
+    echo " -w PERCENT : Percent(1-100) use when to warning"
+    echo " -c PERCENT : Percent(1-100) use when to critical"
+}
+
+warning_level=${warning_level:-90}
+critical_level=${critical_level:-95}
+
+MemTotal=`cat /proc/meminfo |grep -w MemTotal |awk '{print $2}'`
+MemFree=`cat /proc/meminfo |grep -w MemFree |awk '{print $2}'`
+MemBuffers=`cat /proc/meminfo |grep -w Buffers |awk '{print $2}'`
+MemCached=`cat /proc/meminfo |grep -w Cached |awk '{print $2}'`
+MemTotalCached=$(($MemBuffers + $MemCached))
+MemUsed=$(($MemTotal - $MemFree - $MemBuffers - $MemCached))
+
+MemTotal_GB=$(echo "scale=2; (($MemTotal) / 1048576)" | bc | awk '{printf "%.2f", $0}')
+MemFree_GB=$(echo "scale=2; (($MemFree) / 1048576)" | bc | awk '{printf "%.2f", $0}')
+MemTotalCached_GB=$(echo "scale=2; (($MemTotalCached) / 1048576)" | bc | awk '{printf "%.2f", $0}')
+MemUsed_GB=$(echo "scale=2; (($MemUsed) / 1048576)" | bc | awk '{printf "%.2f", $0}')
+
+Use_Percent=$(echo "scale=1; (($MemUsed*100)/$MemTotal)" | bc)
+
+#Parse Parameters
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h | --help)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+        -w | --warning)
+            shift
+            warning_level=$1
+            ;;
+        -c | --critical)
+            shift
+            critical_level=$1
+            ;;
+        *)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+        esac
+shift
+done
+
+if [ "$warning_level" -ge "$critical_level" ]; then
+    echo "UNKOWN - WARN level must not be greater than CRITICAL when checking USED memory!!"
+    exit $STATE_UNKNOWN
+fi
+
+if [ $(echo " $Use_Percent > $critical_level" | bc) -eq 1 ]; then
+    echo "CRITICAL - $Use_Percent% ($MemUsed_GB GB) used. $MemTotal_GB GB total. | TOTAL="$MemTotal_GB"GB;;;; USED="$MemUsed_GB"GB;;;; FREE="$MemFree_GB"GB;;;; CACHES="$MemTotalCached_GB"GB;;;;"
+    exit $STATE_CRITICAL
+elif [ $(echo " $Use_Percent > $warning_level" | bc) -eq 1 ]; then
+    echo "WARNING - $Use_Percent% ($MemUsed_GB GB) used. $MemTotal_GB GB total. | TOTAL="$MemTotal_GB"GB;;;; USED="$MemUsed_GB"GB;;;; FREE="$MemFree_GB"GB;;;; CACHES="$MemTotalCached_GB"GB;;;;"
+    exit $STATE_WARNING
+else
+    echo "OK - $Use_Percent% ($MemUsed_GB GB) used. $MemTotal_GB GB total. | TOTAL="$MemTotal_GB"GB;;;; USED="$MemUsed_GB"GB;;;; FREE="$MemFree_GB"GB;;;; CACHES="$MemTotalCached_GB"GB;;;;"
+    exit $STATE_OK
+fi

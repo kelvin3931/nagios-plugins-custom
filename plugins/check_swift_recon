@@ -1,0 +1,131 @@
+#!/bin/sh
+#
+# check_swift_recon - Check OpenStack Swift total disk space
+#
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+# Plugin parameters value if not define
+warning_level=20
+critical_level=10
+
+print_help() {
+    echo "Usage: check_swift_recon [-h] [-r REPLICATION] [-w warnlevel] [-c critlevel]"
+    echo "options:"
+    echo " -w PERCENT : Percent(1-100) use when to warning"
+    echo " -c PERCENT : Percent(1-100) use when to critical"
+    echo " -r REPLICATION : Query replication complete time"
+    exit 0
+}
+
+check_swift_recon_command() {
+    if ! which swift-recon >/dev/null 2>&1
+        then
+        echo "swift-recon command not found"
+        exit $STATE_UNKNOWN
+    fi
+
+    #if [ -z $SWIFT_RECON_REPORT ]; then
+    #    echo "UNKOWN - swift-recon is error!!"
+    #    exit $STATE_UNKNOWN
+    #fi
+}
+
+replication_stats() {
+    check_swift_recon_command
+    SWIFT_REP_STATS_OLD=$(swift-recon -r | grep 'Oldest' | sed 's/:6000/ /g')
+    SWIFT_REP_STATS_MOST=$(swift-recon -r | grep 'Most' | sed 's/:6000/ /g')
+    SWIFT_REP_OLD_DATE=`echo $SWIFT_REP_STATS_OLD | cut -d " " -f 4,5 `
+    SWIFT_REP_OLD_IP=`echo $SWIFT_REP_STATS_OLD | cut -d " " -f 10`
+    SWIFT_REP_MOST_DATE=`echo $SWIFT_REP_STATS_MOST | cut -d " " -f 5,6`
+    SWIFT_REP_MOST_IP=`echo $SWIFT_REP_STATS_MOST | cut -d " " -f 11`
+    echo "OK - Oldest date:$SWIFT_REP_OLD_DATE by $SWIFT_REP_OLD_IP; Most recent date: $SWIFT_REP_MOST_DATE by $SWIFT_REP_MOST_IP;"
+}
+
+swift_unmounted() {
+    check_swift_recon_command
+    SWIFT_REP_UNMOUNT=$(swift-recon -u | grep 'Not' | sed 's/:6000/ /g')
+    #SWIFT_REP_UNMOUNT=$(cat unmount | grep 'Not' | sed 's/:6000/ /g')
+    if [ -n "$SWIFT_REP_UNMOUNT" ] ; then
+        SWIFT_REP_UNMOUNT_DEV=`echo $SWIFT_REP_UNMOUNT | cut -d " " -f 3`
+        SWIFT_REP_UNMOUNT_IP=`echo $SWIFT_REP_UNMOUNT | cut -d " " -f 5`
+        echo "Dev:$SWIFT_REP_UNMOUNT_DEV, IP:$SWIFT_REP_UNMOUNT_IP"
+        exit $STATE_CRITICAL
+    else
+        echo "OK"
+        exit $STATE_OK
+    fi
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --help|-h)
+            print_help
+            exit $STATE_UNKNOWN
+        ;;
+        --warning|-w)
+            shift
+            warning_level=$1
+            ;;
+        --critical|-c)
+            shift
+            critical_level=$1
+            ;;
+        --replication_stats|-r)
+            replication_stats
+            exit $STATE_OK
+            ;;
+        --unmounted|-u)
+            swift_unmounted
+            ;;
+        *)
+            print_help
+            exit $STATE_UNKNOWN
+            ;;
+    esac
+shift
+done
+
+check_swift_recon_command
+SWIFT_RECON_REPORT=$(swift-recon -d --top=5 | grep 'used')
+SWIFT_RECON_REPORT_FREE=$(swift-recon -d --top=5 | grep 'free')
+SWIFT_RECON_TOP_REPORT=$(swift-recon -d --top=1 | tail -1)
+
+SWIFT_RECON_TOP_PERCENT=`echo $SWIFT_RECON_TOP_REPORT | cut -d " " -f 1`
+SWIFT_RECON_TOP_IP=`echo $SWIFT_RECON_TOP_REPORT | cut -d " " -f 2`
+SWIFT_RECON_TOP_DEV=`echo $SWIFT_RECON_TOP_REPORT | cut -d " " -f 3`
+
+SWIFT_DISK_USE=`echo $SWIFT_RECON_REPORT | cut -d " " -f 5`
+SWIFT_DISK_TOTAL=`echo $SWIFT_RECON_REPORT | cut -d " " -f 7`
+SWIFT_DISK_FREE=`echo $SWIFT_RECON_REPORT_FREE | cut -d " " -f 5`
+SWIFT_DISK_USE_GB=$(echo "scale=2; ((((($SWIFT_DISK_USE / 1024) / 1024) / 1024)))" | bc)
+SWIFT_DISK_FREE_GB=$(echo "scale=2; ((((($SWIFT_DISK_FREE / 1024) / 1024) / 1024)))" | bc)
+SWIFT_DISK_TOTAL_GB=$(echo "scale=2; (((($SWIFT_DISK_TOTAL / 1024) /1024) /1024))" | bc)
+SWIFT_DISK_USE_PERCENT=$(echo "scale=2; (($SWIFT_DISK_USE*100)/$SWIFT_DISK_TOTAL)" | bc)
+SWIFT_DISK_FREE_PERCENT=$(echo "scale=2; (($SWIFT_DISK_FREE*100)/$SWIFT_DISK_TOTAL)" | bc)
+
+if [ "$warning_level" -le "$critical_level" ]; then
+    echo "UNKOWN - WARN level must be greater than CRITICAL!!"
+    exit $STATE_UNKNOWN
+fi
+
+SWIFT_WARNING_SIZE=$(echo "scale=2; ((((($SWIFT_DISK_TOTAL * $warning_level) / 100) / 1024) / 1024) / 1024)" | bc)
+SWIFT_CRITICAL_SIZE=$(echo "scale=2; ((((($SWIFT_DISK_TOTAL * $critical_level) / 100) / 1024) / 1024) / 1024)" | bc)
+
+PERFORM_DATA="| Free=${SWIFT_DISK_FREE_GB}GB;${SWIFT_WARNING_SIZE};${SWIFT_CRITICAL_SIZE};${SWIFT_DISK_USE_GB};${SWIFT_DISK_TOTAL_GB}"
+if [ $(echo " $SWIFT_DISK_FREE_PERCENT < $critical_level" | bc) -eq 1 ]; then
+    echo "CRITICAL - $SWIFT_DISK_FREE_PERCENT% ($SWIFT_DISK_FREE_GB GB) free. $SWIFT_DISK_USE_PERCENT% ($SWIFT_DISK_USE_GB GB) used. $SWIFT_DISK_TOTAL_GB GB total."
+    echo "TOP1=$SWIFT_RECON_TOP_IP $SWIFT_RECON_TOP_DEV($SWIFT_RECON_TOP_PERCENT) $PERFORM_DATA"
+    exit $STATE_CRITICAL
+elif [ $(echo " $SWIFT_DISK_FREE_PERCENT < $warning_level" | bc) -eq 1 ]; then
+    echo "WARNING - $SWIFT_DISK_FREE_PERCENT% ($SWIFT_DISK_FREE_GB GB) free. $SWIFT_DISK_USE_PERCENT% ($SWIFT_DISK_USE_GB GB) used. $SWIFT_DISK_TOTAL_GB GB total."
+    echo "TOP1=$SWIFT_RECON_TOP_IP $SWIFT_RECON_TOP_DEV($SWIFT_RECON_TOP_PERCENT) $PERFORM_DATA"
+    exit $STATE_WARNING
+else
+    echo "OK - $SWIFT_DISK_FREE_PERCENT% ($SWIFT_DISK_FREE_GB GB) free. $SWIFT_DISK_USE_PERCENT% ($SWIFT_DISK_USE_GB GB) used. $SWIFT_DISK_TOTAL_GB GB total."
+    echo "TOP1=$SWIFT_RECON_TOP_IP $SWIFT_RECON_TOP_DEV($SWIFT_RECON_TOP_PERCENT) $PERFORM_DATA"
+    exit $STATE_OK
+fi

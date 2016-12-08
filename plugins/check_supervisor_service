@@ -1,0 +1,87 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+if [ $# -eq 0 ]; then
+  echo "ERROR - no service name specific"
+  exit "${STATE_UNKNOWN}"
+fi
+
+__usage() {
+  echo "Usage: check_supervisor_service [-h] [-g group_name] -n service_name"
+  echo "options:"
+  echo " group name : supervisor group name of the service (optional)"
+  echo " service name : supervisor service name"
+}
+
+#Parse Parameters
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h | --help)
+      __usage
+      exit $STATE_UNKNOWN
+      ;;
+    -g | --group)
+      shift
+      GROUP=$1
+      ;;
+    -n | --name)
+      shift
+      SERVICE=$1
+      ;;
+  esac
+shift
+done
+
+if [ -z "${SERVICE}" ]; then
+  echo "UNKNOWN - service name not defined"
+  exit "${STATE_UNKNOWN}"
+fi
+
+if ! [[ "${SERVICE}" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+  echo "UNKNOWN - service name not valid"
+  exit "${STATE_UNKNOWN}"
+fi
+
+if [ ! -z "${GROUP}" ]; then
+  if ! [[ "${GROUP}" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo "UNKNOWN - group name not valid"
+    exit "${STATE_UNKNOWN}"
+  fi
+fi
+
+if [ ! -f "/etc/supervisor/supervisord.conf" ]; then
+  echo "CRITICAL - supervisor not installed"
+  exit "${STATE_CRITICAL}"
+fi
+
+__supervisor() {
+  # status check for supervisor service
+  if [ -z "${GROUP}" ]; then
+    TARGET="${SERVICE}"
+  else
+    TARGET="${GROUP}:${SERVICE}"
+  fi
+
+  MSG=$(supervisorctl status "${TARGET}")
+  if echo "${MSG}" | grep -q "No such process"; then
+    echo "CRITICAL - specific serivce not defined in supervisor"
+    exit "${STATE_CRITICAL}"
+  fi
+
+  echo "${MSG}" | grep -q "RUNNING"
+  RC=$?
+}
+
+__supervisor
+
+if [ "${RC}" -eq 0 ]; then
+  echo "OK - service is running"
+  exit "${STATE_OK}"
+else
+  echo "CRITICAL - service is not running"
+  exit "${STATE_CRITICAL}"
+fi

@@ -1,0 +1,66 @@
+#!/usr/bin/python
+# -*- coding:utf-8 -*-
+
+import argparse
+import getopt
+import sys
+import subprocess
+
+
+def run_command():
+    pool_error_count = 0
+    fail_pool = []
+    command = "ls /dev/mapper |grep 5000c5"
+    output = subprocess.Popen(command, stdout=subprocess.PIPE, shell=True)
+    for line in output.stdout.readlines():
+        data = "/dev/mapper/" + ' '.join(line.split())
+        command_smartctl = "smartctl -H -d scsi {0}".format(data)
+        output_smartctl = subprocess.Popen(command_smartctl,
+                                           stdout=subprocess.PIPE,
+                                           shell=True)
+        outputstring = output_smartctl.communicate()[0]
+        if outputstring.find('failed') is not -1:
+            fail_pool.append(' '.join(line.split()))
+            pool_error_count += 1
+        elif outputstring.find('Failure') is not -1:
+            fail_pool.append(' '.join(line.split()))
+            pool_error_count += 1
+    show_output(fail_pool, pool_error_count)
+
+
+def show_output(fail_pool, error_count):
+    if error_count == 0:
+        print "OK- All PASSED."
+        sys.exit(0)
+    else:
+        print "Critical- %d Failure:%s." % (error_count, ','.join(fail_pool))
+        sys.exit(2)
+
+
+def main():
+    '''
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], "h", ["help"])
+    except getopt.GetoptError as err:
+        print err
+        usage()
+        sys.exit(2)
+
+    if len(args) < 1 or len(args) > 1:
+        usage()
+        sys.exit(2)
+
+    if len(opts) is not 0:
+        for o, a in opts:
+            if o in ("-h", "--help"):
+                usage()
+                sys.exit(2)
+            else:
+                usage()
+                sys.exit(2)
+    '''
+    run_command()
+
+
+if __name__ == '__main__':
+    main()

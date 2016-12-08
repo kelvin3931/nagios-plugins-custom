@@ -1,0 +1,89 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+usage() {
+    echo "Usage: check_disk_df [-h] [-w warnlevel] [-c critlevel] [-p partition]"
+    echo "options:"
+    echo " -w PERCENT : Percent(1-100) use when to warning"
+    echo " -c PERCENT : Percent(1-100) use when to critical"
+    echo " -p : Partition name"
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --help|-h)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+        --warning|-w)
+            shift
+            WARNING=$1
+            ;;
+        --critical|-c)
+            shift
+            CRITICAL=$1
+            ;;
+        --parition|-p)
+            shift
+            NAME=$1
+            ;;
+        *)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+    esac
+shift
+done
+
+if [ ! -z ${WARNING} ]; then
+  WARNING=$(sed 's/%//' <<< ${WARNING})
+fi
+
+if [ ! -z ${CRITICAL} ]; then
+  CRITICAL=$(sed 's/%//' <<< ${CRITICAL})
+fi
+
+WARNING=${WARNING:-10}
+CRITICAL=${CRITICAL:-3}
+
+OUTPUT_M=$(df -T -m "${NAME}" | awk 'NR == 2')
+OUTPUT_H=$(df -T -h "${NAME}" | awk 'NR == 2')
+
+TOTAL_M=$(echo "${OUTPUT_M}" | awk '{print $3}')
+TOTAL_H=$(echo "${OUTPUT_H}" | awk '{print $3}')
+
+USED_M=$(echo "${OUTPUT_M}" | awk '{print $4}')
+
+FREE_M=$(echo "${OUTPUT_M}" | awk '{print $5}')
+
+SIZE_UNIT="MB"
+
+USE_PERCENT=$(echo "${OUTPUT_H}" | sed 's/%//' | awk '{print $6}')
+FREE_PERCENT=$(echo "100 - ${USE_PERCENT}" | bc)
+
+FREE_WARNING=$(echo "${TOTAL_M} * (100 - ${WARNING}) / 100" | bc)
+FREE_CRITICAL=$(echo "${TOTAL_M} * (100 - ${CRITICAL}) / 100" | bc)
+
+get_result() {
+    echo -n "$1 - "
+    echo -n "${FREE_PERCENT}% (${FREE_M} ${SIZE_UNIT}) free. ${TOTAL_H} total."
+    echo "| $NAME=${USED_M}${SIZE_UNIT};${FREE_WARNING};${FREE_CRITICAL};0;${TOTAL_M}"
+}
+
+if [ ${FREE_PERCENT} -le ${CRITICAL} ]; then
+    get_result "CRITICAL"
+    exit $STATE_CRITICAL
+elif [ ${FREE_PERCENT} -le ${WARNING} ]; then
+    get_result "WARNING"
+    exit $STATE_WARNING
+elif [ ${FREE_PERCENT} -gt ${WARNING} ]; then
+    get_result "OK"
+    exit $STATE_OK
+else
+    get_result "UNKNOWN"
+    exit $STATE_UNKNOWN
+fi

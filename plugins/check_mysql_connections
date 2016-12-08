@@ -1,0 +1,89 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+usage() {
+    echo "Usage: check_mysql_connections [-h] [-u user] [-p password] [-w warning] [-c critical]"
+    echo "options:"
+    echo " -u : Database user "
+    echo " -p : Database password"
+    echo " -w : Database connections warning level"
+    echo " -c : Database connections critical level"
+}
+
+WARNING=90
+CRITICAL=95
+
+check_crm() {
+    HOST_NAME=`hostname`
+    LOCATE_SHOW=`crm_resource --resource p_mysql --locate`
+    LOCATE_HOST=`echo $LOCATE_SHOW | cut -d " " -f 6`
+
+    SLAVE_ONLINE=`crm status |grep Online |grep ${HOST_NAME}`
+
+    if [ "${LOCATE_HOST}" = "${HOST_NAME}" ]; then
+        :
+    elif [ "${SLAVE_ONLINE}" != "" ]; then
+        echo "OK - Slave node. p_mysql is running on master."
+        exit $STATE_OK
+    else
+            echo "UNKNOWN: mysqladmin program not found."
+            exit $STATE_UNKNOWN
+    fi
+}
+
+check_crm
+
+#Parse Parameters
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h | --help)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+        -u | --user)
+            shift
+            USER=$1
+            ;;
+        -p | --password)
+            shift
+            PASS=$1
+            ;;
+        -w | --warning)
+            shift
+            WARNING=$1
+            ;;
+        -c | --critical)
+            shift
+            CRITICAL=$1
+            ;;
+        *)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+        esac
+shift
+done
+
+MAX_CONN=`mysqladmin --user=$USER --password=$PASS variables |grep max_connections | awk {'print $4'}`
+CONN=$((`mysqladmin --user=$USER --password=$PASS processlist |wc -l` - 4))
+
+WARN_VALUE=$((${MAX_CONN}*${WARNING}/100))
+CRIT_VALUE=$((${MAX_CONN}*${CRITICAL}/100))
+
+if [ $CONN -ge $CRIT_VALUE ]; then
+    echo "CRITICAL - Current connections number:$CONN, Max connections number:$MAX_CONN | Connections=$CONN;$WARN_VALUE;$CRIT_VALUE;;"
+    exit $STATE_CRITICAL
+elif [ $CONN -ge $WARN_VALUE ]; then
+    echo "WARNING - Current connections number:$CONN, Max connections number:$MAX_CONN | Connections=$CONN;$WARN_VALUE;$CRIT_VALUE;;"
+    exit $STATE_WARNING
+elif [ $CONN -ge 0 ]; then
+    echo "OK - Current connections number:$CONN, Max connections number:$MAX_CONN | Connections=$CONN;$WARN_VALUE;$CRIT_VALUE;;"
+    exit $STATE_OK
+else
+    echo "UNKNOWN - command not found or connection value error."
+    exit $STATE_UNKNOWN
+fi

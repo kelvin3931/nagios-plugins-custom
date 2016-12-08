@@ -1,0 +1,21 @@
+#!/bin/sh
+
+[ $# -ne 1 ] && exit 1
+
+resource=$1
+hostname=$(hostname)
+input="/tmp/crm_output"
+
+crm_mon -f1 > $input
+
+host=$(awk '/^\* Node '$hostname':/{print NR;}' $input)
+last=$(awk '/\* Node [a-z0-9\-_]+:/{n=NR} END{print n}' $input)
+line=$(awk 'END{print NR}' $input)
+
+if [ -n $last ] && [ -n $host ]; then
+  [ $host -lt $last ] && line=$last
+  ret=$(awk 'NR > '$host' && NR <= '$line' && /[ \t]*'$resource':.* fail-count=/' $input | \
+        sed 's/^.* fail-count=\([0-9]\+\).*/\1/g')
+fi
+rm /tmp/crm_output
+echo ${ret:-0}

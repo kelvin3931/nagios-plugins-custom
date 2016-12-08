@@ -1,0 +1,71 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+
+STATE_OK=0
+STATE_WARNING=1
+STATE_CRITICAL=2
+STATE_UNKNOWN=3
+
+__usage() {
+    echo "Usage: $PROGNAME [-h] [-n number] [-p port] [-H host]"
+    echo "options:"
+    echo "    number: number of search engine cluster member"
+}
+
+#Parse Parameters
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h | --help)
+            __usage
+            exit $STATE_UNKNOWN
+            ;;
+        -n | --number)
+            shift
+            CLUSTER_NUM=$1
+            ;;
+        -p | --port)
+            shift
+            PORT=$1
+            ;;
+        -H | --host)
+            shift
+            IP=$1
+            ;;
+        *)
+            __usage
+            exit $STATE_UNKNOWN
+            ;;
+    esac
+shift
+done
+
+NODE_INFO=`curl -s "http://$IP:$PORT/_cat/nodes" | awk -F " " '{print $1}'`
+HEALTH=`curl -s "http://$IP:$PORT/_cat/health" | awk -F " " '{print $4}'`
+
+if [ -z "${HEALTH}" ] ;then
+    echo "CRITICAL - Can't not connect to elasticsearch server"
+    exit $STATE_CRITICAL
+fi
+
+FAIL_NUM=0
+
+for i in $(seq 1 $CLUSTER_NUM)
+do
+    FIND=`echo "$NODE_INFO" | grep $i`
+    if [ $? -ne 0 ]; then
+        FAIL_ID=`echo "$FAIL_ID $i"`
+        FAIL_NUM=`echo $(( $FAIL_NUM + 1 ))`
+    fi
+done
+
+if [ "$FAIL_NUM" -eq 0 ]; then
+    echo "OK - service is running "
+    exit $STATE_OK
+elif [ "$FAIL_NUM" -ne 0 ] && [ "$FAIL_NUM" -lt "$CLUSTER_NUM" ]; then
+    echo "CRITICAL - search engine node error id:$FAIL_ID "
+    exit $STATE_CRITICAL
+else
+    echo "UNKNOWN - unknown error"
+    exit $STATE_UNKNOWN
+fi

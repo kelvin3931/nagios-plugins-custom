@@ -1,0 +1,18 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+SYSLOG="/var/log/syslog"
+
+COUNT_OOM=`grep "Out of memory: Kill" $SYSLOG |wc -l`
+
+if [ $COUNT_OOM -eq 0 ]; then
+    echo "OK - OOM(out of memory) everything is fine."
+    exit $STATE_OK
+else
+    echo "CRITICAL - OOM(out of memory) is detected."
+    exit $STATE_CRITICAL
+fi

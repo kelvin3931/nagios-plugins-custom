@@ -1,0 +1,145 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+
+UNIT_TEMP="degreeC"
+UNIT_POWER="Watts"
+
+usage() {
+    echo "Usage: check_ipmi [-h] [-i ipaddr] [-t type]"
+    echo
+    echo "options:"
+    echo " -i, --ip : BMC IP address"
+    echo " -t, --type : Sensor type"
+    echo " -r, --remote : send ipmi check via remote command"
+    echo " -u, --user : user name for ipmi remote check"
+    echo " -p, --password : password for ipmi remote check"
+    echo " -s, --second : timout for ipmi remote check"
+}
+
+# parse input
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h | --help)
+      usage
+      exit ${STATE_UNKNOWN}
+      ;;
+    -i | --ip)
+      shift
+      IP="$1"
+      ;;
+    -r | --remote)
+      shift
+      REMOTE="$1"
+      ;;
+    -s | --second)
+      shift
+      TIMEOUT="$1"
+      ;;
+    -p | --password)
+      shift
+      PASSWD=$1
+      ;;
+    -t | --type)
+      shift
+      TYPE="$1"
+      ;;
+    -u | --user)
+      shift
+      USER="$1"
+      ;;
+    *)
+      usage
+      exit ${STATE_UNKNOWN}
+      ;;
+  esac
+  shift
+done
+
+REMOTE=${REMOTE:-0}
+TIMEOUT=${TIMEOUT:-5}
+IP=${IP:-127.0.0.1}
+USER=${USER:-root}
+PASSWD=${PASSWD:-root}
+TYPE=${TYPE:-TEMP}
+
+if [ ${REMOTE} -eq 0 ]; then
+  IPMI_CMD="ipmitool"
+else
+  IPMI_CMD="ipmitool -H ${IP} -U ${USER} -P ${PASSWD}"
+fi
+
+ping_check() {
+  ping -q -W3 -c1 "$1" >/dev/null 2>&1
+  if [ $? -ne 0 ]; then
+    echo "CRITICAL - target host unreachable."
+    exit $STATE_CRITICAL
+  fi
+}
+
+ipmi_check_response() {
+  timeout ${TIMEOUT} ${IPMI_CMD} chassis status >/dev/null 2>&1
+  if [ $? -ne 0 ]; then
+    echo "CRITICAL - target host not response."
+    exit $STATE_CRITICAL
+  fi
+}
+
+get_value_cpu() {
+  ${IPMI_CMD} -c sdr get 'CPU0_Temp' 'CPU0 Temp' 'Temp_CPU0' 2>/dev/null | grep -v '^Unable' | head -1 | awk -F ',' '$4=="ok"{print$2}'
+}
+
+get_value_mem() {
+  ${IPMI_CMD} -c sdr get 'DIMM_TempA0' 'DIMM Temp' 'Temp_DIMM_A0' 'P0_DIMM_Temp' 'Temp_DIMM_A' 'Temp_DIMM_AB' 2>/dev/null | grep -v '^Unable' | head -1 | awk -F ',' '$4=="ok"{print$2}'
+}
+
+get_value_power() {
+  ${IPMI_CMD} -c sdr get 'PSU_Output' 'PWR Consumption' 'PSU_Input_Power' 2>/dev/null | grep -v '^Unable' | head -1 | awk -F ',' '$4=="ok"{print$2}'
+}
+
+get_result_temp() {
+  echo "$1 CPU_Temp=${TEMP_CPU} ${UNIT_TEMP}, DIMM_Temp=${TEMP_DIMM} ${UNIT_TEMP} | CPU_Temp=${TEMP_CPU};80;80;; DIMM_Temp=${TEMP_DIMM};80;80;; "
+}
+
+get_result_power() {
+  echo "$1 PSU_Output=${PSU_VALUE} ${UNIT_POWER} | PSU_Output=${PSU_VALUE};700;700;;"
+}
+
+[ ${REMOTE} -eq 1 ] && ping_check "${IP}"
+
+ipmi_check_response
+
+if [ X"${TYPE}" = X"TEMP" ]; then
+  TEMP_CPU="$(get_value_cpu)"
+  [ -z "${TEMP_CPU}" ] && TEMP_CPU=0
+
+  TEMP_DIMM="$(get_value_mem)"
+  [ -z "${TEMP_DIMM}" ] && TEMP_DIMM=0
+
+  if [ "${TEMP_CPU}" -gt 80 ] || [ "${TEMP_DIMM}" -gt 80 ] ||
+     [ "${TEMP_CPU}" -le 0 ]  || [ "${TEMP_DIMM}" -le 0 ]; then
+    get_result_temp "WARNING - abnormal senser value detected."
+    exit ${STATE_WARNING}
+  else
+    get_result_temp "OK -"
+    exit ${STATE_OK}
+  fi
+elif [ X"${TYPE}" = X"POWER" ]; then
+  PSU_VALUE="$(get_value_power)"
+  [ -z "${PSU_VALUE}" ] && PSU_VALUE=0
+
+  if [ "${PSU_VALUE}" -gt 700 ] || [ "${PSU_VALUE}" -le 0 ]; then
+    get_result_power "WARNING - abnormal sensor value detected."
+    exit ${STATE_WARNING}
+  else
+    get_result_power "OK -"
+    exit ${STATE_OK}
+  fi
+else
+  echo "UNKNOWN - target model not support."
+  exit ${STATE_UNKNOWN}
+fi

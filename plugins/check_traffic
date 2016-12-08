@@ -1,0 +1,129 @@
+#!/bin/sh
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+# if input are invalid
+usage() {
+  echo "Useage: $0 -i INTERFACE -w WARNING -c CRITICAL [-n INTERVAL]"
+  exit ${STATE_UNKNOWN}
+}
+
+if [ $# -eq 0 ]; then
+  usage
+fi
+
+while getopts ":i:c:n:w:" optname
+  do
+    case "$optname" in
+      i)
+        NIC=$OPTARG
+        ;;
+      c)
+        CRITICAL=$OPTARG
+        ;;
+      n)
+        INTERVAL=$OPTARG
+        ;;
+      w)
+        WARNING=$OPTARG
+        ;;
+      *)
+        usage
+        ;;
+    esac
+  done
+
+if [ -z "$NIC" ]; then
+  echo "UNKNOWN - no device input."
+  exit ${STATE_UNKNOWN}
+fi
+
+if [ ! -d "/sys/class/net/${NIC}" ]; then
+  echo "CRITICAL - no such device (${NIC})."
+  exit ${STATE_CRITICAL}
+fi
+
+# set default value, if not input detected
+WARNING=${WARNING:-1048576}
+CRITICAL=${CRITICAL:-2097152}
+INTERVAL=${INTERVAL:-1}
+
+# wait interval must not less than 1s
+[ "${INTERVAL}" -lt 1 ] && INTERVAL=1
+
+# detect if input is valid
+if [ "${WARNING}" -gt "${CRITICAL}" ]; then
+  echo "UNKNOWN - input invalid, WARNING must not greater than CRITICAL"
+  exit ${STATE_UNKNOWN}
+fi
+
+# link speed detection
+RX_OLD=$(cat /sys/class/net/"${NIC}"/statistics/rx_bytes)
+TX_OLD=$(cat /sys/class/net/"${NIC}"/statistics/tx_bytes)
+
+sleep ${INTERVAL}
+
+RX_NEW=$(cat /sys/class/net/"${NIC}"/statistics/rx_bytes)
+TX_NEW=$(cat /sys/class/net/"${NIC}"/statistics/tx_bytes)
+
+if [ "$((RX_NEW - RX_OLD))" -eq 0 ]; then
+  RX_DIFF=0
+else
+  RX_DIFF=$(((RX_NEW - RX_OLD) / ${INTERVAL}))
+fi
+
+if [ "$((TX_NEW - TX_OLD))" -eq 0 ]; then
+  TX_DIFF=0
+else
+  TX_DIFF=$(((TX_NEW - TX_OLD) / ${INTERVAL}))
+fi
+
+LINKSTATE=$(cat /sys/class/net/"${NIC}"/carrier 2>/dev/null)
+if [ $? -ne 0 ]; then
+  echo "CRITICAL - Link is not detected."
+  exit ${STATE_CRITICAL}
+fi
+
+if [ "${LINKSTATE}" != "1" ]; then
+  echo "CRITICAL - Link is not detected."
+  exit ${STATE_CRITICAL}
+fi
+
+BANDWIDTH=$(cat /sys/class/net/"${NIC}"/speed 2>/dev/null)
+if [ $? -ne 0 ]; then
+  BANDWIDTH=-1
+fi
+
+get_result() {
+  if [ "${BANDWIDTH}" -le 0 ]; then
+    echo "$1 In=${RX_DIFF} bytes/s,Out=${TX_DIFF} bytes/s| In=${RX_DIFF};${WARNING};${CRITICAL};0;0; Out=${TX_DIFF};${WARNING};${CRITICAL};0;0"
+  else
+    echo "$1 In=${RX_DIFF} bytes/s,Out=${TX_DIFF} bytes/s,Speed=${BANDWIDTH} Mb/s| In=${RX_DIFF};${WARNING};${CRITICAL};0;0; Out=${TX_DIFF};${WARNING};${CRITICAL};0;0"
+  fi
+}
+
+if [ "${BANDWIDTH}" -lt 1000 ]; then
+  if [ "${BANDWIDTH}" -gt 0 ]; then
+    get_result "WARNING - Abnormal bandwidth detected."
+    exit ${STATE_WARNING}
+  else
+    get_result "OK -"
+  fi
+elif [ "${RX_DIFF}" -gt "${CRITICAL}" ] || [ "${RX_DIFF}" -eq "${CRITICAL}" ] || \
+     [ "${TX_DIFF}" -gt "${CRITICAL}" ] || [ "${TX_DIFF}" -eq "${CRITICAL}" ]; then
+  get_result "CRITICAL - heavy load"
+  exit ${STATE_CRITICAL}
+elif [ "${RX_DIFF}" -gt "${WARNING}" ] || [ "${RX_DIFF}" -eq "${WARNING}" ] || \
+     [ "${TX_DIFF}" -gt "${WARNING}" ] || [ "${TX_DIFF}" -eq "${WARNING}" ]; then
+  get_result "WARNING - heavy load"
+  exit ${STATE_WARNING}
+elif [ "${RX_DIFF}" -lt "${WARNING}" ];then
+  get_result "OK -"
+  exit ${STATE_OK}
+else
+  get_result "UNKONWN -"
+  exit ${STATE_UNKNOWN}
+fi

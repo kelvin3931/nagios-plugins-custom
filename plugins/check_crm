@@ -1,0 +1,91 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+usage() {
+    echo "Usage: check_crm [-h] [-d] [-r]"
+    echo "options:"
+    echo " -h : Show help"
+    echo " -d : Debug Mode"
+    echo " -r : crm resource"
+
+    echo "Examples:"
+    echo "  check_crm -r p_mysql"
+}
+
+debug() {
+    set -x
+}
+
+crm_resource_locate(){
+    HOST_NAME=$(hostname)
+
+    crm status | egrep "Online: \[ .* \]" | grep -q "${HOST_NAME}"
+    IS_ONLINE=$?
+
+    RUNNING_COUNT=$(crm_resource -r $CRM_RESOURCE -W 2>/dev/null | wc -l)
+
+    crm_resource -r $CRM_RESOURCE -W 2>/dev/null | grep -q "${HOST_NAME}"
+    IS_RUNNING=$?
+
+    if [ ${RUNNING_COUNT} -eq 0 ]; then
+        echo "CRITICAL - service is not running."
+        exit $STATE_CRITICAL
+    fi
+
+    crm_mon -f1 | grep "fail-count=" | grep -q "${CRM_RESOURCE}"
+    if [ $? -eq 0 ]; then
+        THRESHOLD=$(crm_mon -f1 | egrep -o "migration-threshold=[0-9]+" | cut -d"=" -f2 | head -1)
+        FAILCOUNT=$($PROGPATH/get_failcount ${CRM_RESOURCE})
+    fi
+
+    THRESHOLD=${THRESHOLD:-1000000}
+    FAILCOUNT=${FAILCOUNT:-0}
+
+    if [ ${IS_RUNNING} -eq 0 ]; then
+        if [ ${FAILCOUNT} -ne 0 ]; then
+            echo "WARNING - service is running. (Failcount: ${FAILCOUNT})"
+            exit $STATE_WARNING
+        else
+            echo "OK - service is running."
+            exit $STATE_OK
+        fi
+    else
+        if [ ${FAILCOUNT} -ge ${THRESHOLD} ]; then
+            echo "CRITICAL - service is not running (failcount is over threshold)"
+            exit $STATE_CRITICAL
+        elif [ ${FAILCOUNT} -ne 0 ]; then
+            echo "WARNING - service is running as Slave. (Failcount: ${FAILCOUNT})"
+            exit $STATE_WARNING
+        else
+            echo "OK - service is running as Slave."
+            exit $STATE_OK
+        fi
+    fi
+}
+
+# Parse parameters
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h | --help)
+            usage
+            exit $STATE_OK
+            ;;
+        -d | --debug)
+            debug
+            ;;
+        -r | --resource)
+            shift
+            CRM_RESOURCE=$1
+            crm_resource_locate
+            ;;
+        *)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+        esac
+shift
+done

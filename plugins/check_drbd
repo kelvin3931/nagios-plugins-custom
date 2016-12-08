@@ -1,0 +1,51 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+usage() {
+    echo "Usage: check_drbd [-h] [Resource Name]"
+}
+
+if ! which drbdadm >/dev/null 2>&1; then
+    echo "UNKNOWN - command not found"
+    exit $STATE_UNKNOWN
+fi
+
+RESOURCE=$1
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --help|-h)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+    esac
+shift
+done
+
+CHECK=`drbd-overview |grep $RESOURCE`
+if [ -z "$CHECK" ] ; then
+    echo "UNKNOWN - Resource is not exist"
+    exit $STATE_UNKNOWN
+fi
+
+CONNECTION_STATE=`drbdadm cstate $RESOURCE`
+DISK_STATE=`drbdadm dstate $RESOURCE | cut -d "/" -f 1`
+ROLE=`drbdadm role $RESOURCE | cut -d "/" -f 1`
+HAVE_PRIMARY=`drbdadm role $RESOURCE | grep Primary`
+
+if [ -z "${HAVE_PRIMARY}" ] ; then
+    echo "WARNING - No primary on drbd"
+    exit $STATE_WARNING
+fi
+
+if [ "${CONNECTION_STATE}" = "Connected" ] ; then
+    echo "OK - Disk state: $DISK_STATE. Connection state:$CONNECTION_STATE. Role: $ROLE"
+    exit $STATE_OK
+else
+    echo "WARNING - Disk state: $DISK_STATE. Connection state:$CONNECTION_STATE. Role: $ROLE"
+    exit $STATE_WARNING
+fi

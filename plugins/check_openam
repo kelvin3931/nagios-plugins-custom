@@ -1,0 +1,41 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+
+usage() {
+    echo "Usage: check_openam [-h] [--target ipaddr]"
+    echo "options:"
+    echo " --target : target IP address"
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --help|-h)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+        --target|-t)
+            shift
+            TARGET=$1
+            ;;
+        *)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+    esac
+shift
+done
+
+TARGET=${TARGET:-127.0.0.1}
+curl --connect-timeout 3 --silent --max-time 3 http://${TARGET}:8080/OpenAM-11.0.0/isAlive.jsp | grep -q "Server is ALIVE"
+if [ $? -eq 0 ]; then
+    echo "OK - OpenAM is running"
+    exit $STATE_OK
+else
+    echo "CRITICAL - OpenAM is not running"
+    exit $STATE_CRITICAL
+fi

@@ -1,0 +1,11 @@
+Source: nagios-plugins-customize
+Section: misc
+Priority: optional
+Maintainer: Jerry <Jerry_Wu@quantatw.com>
+Build-Depends: debhelper (>= 4.0.0)
+Standards-Version: 3.6.2
+
+Package: nagios-plugins-customize
+Architecture: all
+Depends:
+Description: Plugins for nagios compatible monitoring customize based systems

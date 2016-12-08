@@ -1,0 +1,84 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+usage() {
+    echo "Usage: check_diskio [-h] [-w warn] [-c critical] [-d device]"
+    echo "options:"
+    echo " -w : Warning threshold value"
+    echo " -c : Critical threshold value"
+    echo " -d : Disk device"
+}
+
+#Set threshold
+WARNING=104857600
+CRITICAL=136314880
+DEV="/dev/sda"
+
+if ! which iostat >/dev/null 2>&1
+    then
+    echo "UNKNOWN: iostat command not found."
+    exit $STATE_UNKNOWN
+fi
+
+#Parse Arguments
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h | --help)
+            usage
+            exit $STATE_OK
+            ;;
+        -d | --device)
+            shift
+            DEV=$1
+            ;;
+        -w  | --warning)
+            shift
+            WARNING=$1
+            ;;
+        -c  | --critical)
+            shift
+            CRITICAL=$1
+            ;;
+        *)  echo "Unknown argument: $1"
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+        esac
+    shift
+done
+
+DISK_DEV_REPORT=`iostat -d $DEV 1 3| tail -2`
+DISK_DEV_CHECK=`echo $DISK_DEV_REPORT | cut -d " " -f 1`
+
+if [ $DISK_DEV_CHECK == "Device:" ]; then
+    echo "CRITICAL - Device is not found !!"
+    exit $STATE_CRITICAL
+fi
+DISK_READ_PER_SECOND=`echo $DISK_DEV_REPORT | cut -d " " -f 3`
+DISK_WRITE_PER_SECOND=`echo $DISK_DEV_REPORT | cut -d " " -f 4`
+DISK_TOTAL_RW_PER_SECOND=$(echo "scale=2; (($DISK_READ_PER_SECOND+$DISK_WRITE_PER_SECOND))" | bc )
+DISK_READ=`echo $DISK_DEV_REPORT | cut -d " " -f 5`
+DISK_WRITE=`echo $DISK_DEV_REPORT | cut -d " " -f 6`
+
+if [ "$WARNING" -ge "$CRITICAL" ]; then
+    echo "UNKNOWN - WARNING value must not be greater than CRITICAL value!!"
+    exit $STATE_UNKNOWN
+fi
+
+DISK_WRITE_PER_SECOND_INT=`echo "scale=0;$DISK_WRITE_PER_SECOND * 100 / 100" |bc `
+DISK_READ_PER_SECOND_INT=`echo "scale=0;$DISK_READ_PER_SECOND * 100 / 100" |bc `
+
+if [ "$DISK_WRITE_PER_SECOND_INT" -ge "$CRITICAL" -o "$DISK_READ_PER_SECOND_INT" -ge "$CRITICAL" ]; then
+    echo "CRITICAL - $DEVICENAME WRITE=$DISK_WRITE_PER_SECOND kB/s. READ=$DISK_READ_PER_SECOND kB/s. | WRITE=$DISK_WRITE_PER_SECOND;$WARNING;$CRITICAL READ=$DISK_READ_PER_SECOND;$WARNING;$CRITICAL TOTAL=$DISK_TOTAL_RW_PER_SECOND;$WARNING;$CRITICAL "
+    exit $STATE_CRITICAL
+elif [ "$DISK_WRITE_PER_SECOND_INT" -ge "$WARNING" -o "$DISK_READ_PER_SECOND_INT" -ge "$WARNING" ]; then
+    echo "WARNING - $DEVICENAME WRITE=$DISK_WRITE_PER_SECOND kB/s. READ=$DISK_READ_PER_SECOND kB/s. | WRITE=$DISK_WRITE_PER_SECOND;$WARNING;$CRITICAL READ=$DISK_READ_PER_SECOND;$WARNING;$CRITICAL TOTAL=$DISK_TOTAL_RW_PER_SECOND;$WARNING;$CRITICAL "
+    exit $STATE_WARNING
+else
+    echo "OK - $DEVICENAME WRITE=$DISK_WRITE_PER_SECOND kB/s. READ=$DISK_READ_PER_SECOND kB/s. | WRITE=$DISK_WRITE_PER_SECOND;$WARNING;$CRITICAL READ=$DISK_READ_PER_SECOND;$WARNING;$CRITICAL TOTAL=$DISK_TOTAL_RW_PER_SECOND;$WARNING;$CRITICAL "
+    exit $STATE_OK
+fi

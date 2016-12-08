@@ -1,0 +1,79 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+usage() {
+    echo "Usage: check_cpu [-h] [-w warnlevel] [-c critlevel]"
+    echo "options:"
+    echo " -w PERCENT : Percent(1-100) use when to warning"
+    echo " -c PERCENT : Percent(1-100) use when to critical"
+}
+
+#Set threshold if not define
+WARNING=70
+CRITICAL=90
+
+INTERVAL=1
+RETRY=3
+if ! which mpstat >/dev/null 2>&1
+    then
+    echo "UNKNOWN: command not found."
+    exit $STATE_UNKNOWN
+fi
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --help|-h)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+        --warning|-w)
+            shift
+            WARNING=$1
+            ;;
+        --critical|-c)
+            shift
+            CRITICAL=$1
+            ;;
+        *)
+            usage
+            exit $STATE_UNKNOWN
+            ;;
+    esac
+shift
+done
+
+RESULT=`vmstat -n $INTERVAL $RETRY| tail -1`
+USER=`echo $RESULT | awk '{ print $13 }'`
+SYSTEM=`echo $RESULT | awk '{ print $14 }'`
+IOWAIT=`echo $RESULT | awk '{ print $16 }'`
+IDLE=`echo $RESULT | awk '{ print $15 }'`
+
+print_result() {
+    STATE=$1
+    echo "${STATE} - user = ${USER}%, system = ${SYSTEM}%, iowait = ${IOWAIT}%, idle = ${IDLE}% | cpu_user=${USER}%;${WARNING};${CRITICAL};; cpu_sys=${SYSTEM}%;${WARNING};${CRITICAL};; cpu_iowait=${IOWAIT}%;${WARNING};${CRITICAL};; cpu_idle=${IDLE}%;${WARNING};${CRITICAL};;"
+}
+
+if [ $(echo "${USER}   - 100 > 0" | bc) -ne 0 ] ||
+   [ $(echo "${SYSTEM} - 100 > 0" | bc) -ne 0 ] ||
+   [ $(echo "${IOWAIT} - 100 > 0" | bc) -ne 0 ] ||
+   [ $(echo "${IDLE}   - 100 > 0" | bc) -ne 0 ]; then
+    echo "UNKNOWN - CPU value error."
+    exit $STATE_UNKNOWN
+elif [ $(echo "${USER}   - ${CRITICAL} > 0" | bc) -ne 0 ] ||
+     [ $(echo "${SYSTEM} - ${CRITICAL} > 0" | bc) -ne 0 ] ||
+     [ $(echo "${IOWAIT} - ${CRITICAL} > 0" | bc) -ne 0 ]; then
+    print_result "CRITICAL"
+    exit $STATE_CRITICAL
+elif [ $(echo "${USER}   - ${WARNING} > 0" | bc) -ne 0 ] ||
+     [ $(echo "${SYSTEM} - ${WARNING} > 0" | bc) -ne 0 ] ||
+     [ $(echo "${IOWAIT} - ${WARNING} > 0" | bc) -ne 0 ]; then
+    print_result "WARNING"
+    exit $STATE_WARNING
+else
+    print_result "OK"
+    exit $STATE_OK
+fi

@@ -1,0 +1,5 @@
+nagios-plugins-customize (1.0.0) unstable; urgency=low
+
+  * Check mount point on disk usage
+
+ -- Jerry <Jerry_Wu@quantatw.com>  Thu, 8 Dec 2016 10:10:14 +0800

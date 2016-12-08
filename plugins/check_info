@@ -1,0 +1,14 @@
+#!/bin/bash
+
+PROGNAME=`/usr/bin/basename $0`
+PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+
+. $PROGPATH/status.sh
+
+LSB_INFO="$(lsb_release -irs | xargs)"
+CPU_MODEL="$(dmidecode --string processor-version | head -1 | sed 's/ \+/ /g')"
+KERNEL_INFO="$(uname -srm)"
+
+echo "Kernel: ${KERNEL_INFO}, OS: ${LSB_INFO}, CPU: ${CPU_MODEL}"
+
+exit $STATE_OK
